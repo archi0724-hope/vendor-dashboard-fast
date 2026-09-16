@@ -94,9 +94,6 @@ def import_documents(store, uploads, forced_company: str = "", read_pdf_text: bo
                     except Exception as error:
                         result.issues.append({"File": path, "Reason": f"Not saved after retry: {type(error).__name__}. Check this file/storage and retry the same Drive link."})
                     finally:
-                        # Drop the current document buffer immediately. Every few
-                        # files also trim libc so long imports stay below Render's
-                        # memory ceiling instead of restarting the service.
                         content = b""
                         if result.processed_files % 5 == 0:
                             _release_memory()
@@ -107,8 +104,6 @@ def import_documents(store, uploads, forced_company: str = "", read_pdf_text: bo
                 stream.seek(0, 2)
                 archive_size = stream.tell()
                 stream.seek(0)
-                # The existing archive store and download UI both materialize a blob.
-                # Keep large originals at their source rather than allocating GBs.
                 if not retain_archive or archive_size > 32 * 1024 * 1024:
                     result.notes.append(f"{upload.name}: original ZIP not copied to Uploaded ZIPs. Keep your source ZIP; extracted documents are saved separately.")
                     continue
@@ -130,9 +125,9 @@ def import_documents(store, uploads, forced_company: str = "", read_pdf_text: bo
     vendors = store.vendors()
     documents = store.documents()
     checklist = build_checklist(vendors, documents)
-    # Total vendor headcount is the number of unique company folders/master rows.
-    # Yes/No counting remains category-specific in the checklist/dashboard.
-    result.total_companies = int(vendors.company_key.nunique()) if len(vendors) else 0
+    # Per user requirement: Yes counts; an all-No company stays visible but does not
+    # increase total headcount.
+    result.total_companies = int((checklist["Available"] > 0).sum()) if len(checklist) else 0
     result.total_stored_files = int(documents.available.sum())
     if result.issues:
         result.notes.append("This import is resumable: paste the same Drive ZIP link and save again. Documents already stored are detected as repeats, so only missing records need to be added.")
