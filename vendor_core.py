@@ -47,7 +47,6 @@ GENERIC_FOLDERS = {
     "identity", "registration", "certifications", "current", "old", "new", "financial documents",
 }
 LEGAL_SUFFIX = re.compile(r"\b(?:pvt|private|limited|ltd|llp|inc|corporation|industries|enterprises|company)\b", re.I)
-# Do not use substring matching for PAN/MD: 'company' and 'Spandan' are not PAN evidence.
 PATTERNS = {
     "Cancelled Cheque": r"\bcheques?\b|\bchecks?\b|\bchq\b|\bcancel(?:led|ed)?\s*(?:cheq(?:ue)?|check)\b",
     "GST": r"\bgst(?:in|n)?\b|\bgoods\s+and\s+services\s+tax\b",
@@ -71,7 +70,6 @@ def normalize(value: str) -> str:
 
 
 def clean_company(value: str) -> str:
-    # Remove list numbering, not digits that are part of a company's real name.
     value = unicodedata.normalize("NFKC", str(value)).strip()
     value = re.sub(r"^\s*(?:\(?\d+\)?\s*[.)_-]\s*|\d+\s+)", "", value)
     return re.sub(r"\s+", " ", value).strip(" _-")
@@ -110,7 +108,6 @@ def is_wrapper(folder: str) -> bool:
         return True
     if LEGAL_SUFFIX.search(value):
         return False
-    # Generic handover names, not a list of particular people.
     if re.search(r"\b(?:vendors?|venders?|suppliers?|handover)\b", value):
         return True
     return bool(re.search(r"\b(?:documents|docs|files|attachments)\s*$", value))
@@ -127,17 +124,13 @@ def is_type_folder(folder: str) -> bool:
 
 def types_from_name(name: str) -> list[str]:
     text = file_stem(name).lower()
-    # GST invoices/challans and incorporation certificates do not prove that the
-    # requested registration or PAN card itself was supplied.
     if SUPPORTING_ONLY.search(text):
-        # An explicitly combined ISO+CE file is still ISO; a company PAN file is
-        # valid, but a 'company registration certificate' is not a PAN file.
         if re.search(PATTERNS["ASF ISO"], text, re.I):
             return ["ASF ISO"]
         return []
     found = [t for t, pattern in PATTERNS.items() if re.search(pattern, text, re.I)]
     if "Udyam" in found and "Aadhar" in found:
-        found.remove("Aadhar")  # Udyog Aadhaar is a business registration.
+        found.remove("Aadhar")
     return found
 
 
@@ -172,7 +165,6 @@ def company_core_words(value: str) -> tuple[str, ...]:
 
 
 def known_company_matches(candidate: str, known_names: Iterable[str]) -> list[str]:
-    """Return canonical names that match a candidate without fuzzy merging."""
     candidate_key = company_key(candidate)
     if isinstance(known_names, dict):
         known = {company_key(alias): clean_company(canonical) for alias, canonical in known_names.items() if company_key(alias)}
@@ -195,7 +187,6 @@ def known_company_matches(candidate: str, known_names: Iterable[str]) -> list[st
 
 
 def match_known_company(candidate: str, known_names: Iterable[str]) -> str | None:
-    """Resolve a unique case-insensitive shared-initial company alias."""
     matches = known_company_matches(candidate, known_names)
     return matches[0] if len(matches) == 1 else None
 
@@ -224,8 +215,6 @@ def infer_company(path: str, known_names: Iterable[str] = (), forced_company: st
             if len(matches) > 1:
                 return None, "Ambiguous company alias", " / ".join(wrappers)
             return candidate, "Company folder", " / ".join(wrappers)
-    # Flat uploads: a known vendor may be matched by a complete name, never a
-    # personal suffix such as 'GST - Mr Someone'. More than one match is unsafe.
     stem = file_stem(path)
     normalized = " " + normalize(stem) + " "
     matches = [(key, name) for key, name in known.items() if len(key) >= 3 and f" {key} " in normalized]
@@ -235,8 +224,6 @@ def infer_company(path: str, known_names: Iterable[str] = (), forced_company: st
         if len(matches) == 1 or all(key in best[0] for key, _ in matches[1:]):
             return best[1], "Vendor master + filename", " / ".join(wrappers)
         return None, "Ambiguous filename", " / ".join(wrappers)
-    # A clear company-prefix / document-suffix is allowed. Do not derive company
-    # names from a suffix after the document keyword; that can be a person's name.
     hits = [m for pattern in PATTERNS.values() if (m := re.search(pattern, stem, re.I))]
     if hits:
         first = min(hits, key=lambda m: m.start())
@@ -251,7 +238,6 @@ def infer_company(path: str, known_names: Iterable[str] = (), forced_company: st
 def classify(path: str, known_names: Iterable[str] = (), content: bytes | None = None, forced_company: str = "", read_pdf_text: bool = False) -> Decision:
     company, ownership, handover = infer_company(path, known_names, forced_company)
     stem = file_stem(path)
-    # Remove the company label from category detection (e.g. 'PAN Industries').
     if company:
         stem = re.sub(re.escape(company).replace(r"\ ", r"[ _]+"), " ", stem, flags=re.I)
     types = types_from_name(stem)
@@ -282,7 +268,6 @@ def classify(path: str, known_names: Iterable[str] = (), content: bytes | None =
 
 
 def types_from_pdf(content: bytes) -> list[str]:
-    """Conservative text-only fallback. No OCR; no broad body-text substrings."""
     if len(content) > 12 * 1024 * 1024:
         return []
     try:
@@ -306,7 +291,6 @@ def types_from_pdf(content: bytes) -> list[str]:
         "Aadhar": [r"unique identification authority of india.*(?:date of birth|dob|year of birth)", r"government of india.*(?:date of birth|dob).*mera aadhaar"],
     }
     found = [t for t, patterns in rules.items() if any(re.search(p, text, re.I) for p in patterns)]
-    # More than one certificate heading in otherwise unnamed content is ambiguous.
     return found if len(found) == 1 else []
 
 
@@ -370,7 +354,6 @@ def iter_archive(content: bytes, source: str, limits: ArchiveLimits, prefix: str
 
 
 def upload_stream(upload):
-    """Use seekable uploads directly; support legacy byte-only callers."""
     if hasattr(upload, "read") and hasattr(upload, "seek"):
         upload.seek(0)
         return upload
@@ -432,9 +415,9 @@ def build_checklist(vendors: pd.DataFrame, documents: pd.DataFrame) -> pd.DataFr
                     review += 1
         found = len(present.intersection(DOCUMENT_TYPES))
         row = {"company_key": vendor.company_key, "Company Name": vendor.company_name,
-                     **{t: "Yes" if t in present else "No" for t in DOCUMENT_TYPES},
-                     "Available": found, "Missing": len(DOCUMENT_TYPES) - found, "Completion": found / len(DOCUMENT_TYPES),
-                     "Files": len(group) if group is not None else 0, "Needs review": review}
+               **{t: "Yes" if t in present else "No" for t in DOCUMENT_TYPES},
+               "Available": found, "Missing": len(DOCUMENT_TYPES) - found, "Completion": found / len(DOCUMENT_TYPES),
+               "Files": len(group) if group is not None else 0, "Needs review": review}
         if "canonical_id" in vendors.columns:
             row["canonical_id"] = vendor.canonical_id
         rows.append(row)
@@ -455,7 +438,6 @@ def filter_checklist(checklist: pd.DataFrame, search: str = "", status: str = "A
 
 
 def discover_folder_companies(uploads) -> list[str]:
-    """Include explicit empty company folders as all-No checklist rows."""
     names = {}
     for upload in uploads:
         if not upload.name.lower().endswith(".zip"):
@@ -500,7 +482,6 @@ SUPPORTING_TYPES = {
     "Passport": r"passport",
     "Marketplace certificate": r"india[ _-]*mart",
     "EC certificate": r"\bec\b.*certif",
-
 }
 
 
@@ -510,7 +491,6 @@ def supporting_category(name: str) -> str:
 
 
 def export_filename(company: str, suffix: str, extension: str) -> str:
-    """Company-named downloads safe on Windows, macOS and browsers."""
     name = unicodedata.normalize("NFKC", company)
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", name)
     name = re.sub(r"\s+", "_", name).strip(" ._")[:100] or "Company"
@@ -520,10 +500,11 @@ def export_filename(company: str, suffix: str, extension: str) -> str:
 
 
 def dashboard_counts(vendors: pd.DataFrame, documents: pd.DataFrame) -> dict:
-    """Global totals never change when a screen filter is applied."""
+    """Global totals. A company counts only when at least one checklist item is Yes."""
     checklist = build_checklist(vendors, documents)
+    yes_companies = int((checklist["Available"] > 0).sum()) if len(checklist) else 0
     return {
-        "companies": int(vendors.company_key.nunique()),
+        "companies": yes_companies,
         "stored_files": int(documents.available.sum()),
         "review_files": int((documents.needs_review | ~documents.available).sum()),
         "complete_companies": int((checklist.Missing == 0).sum()),
