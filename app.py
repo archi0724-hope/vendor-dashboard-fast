@@ -28,7 +28,7 @@ CATEGORY_LABELS = {"ASF ISO": "ISO"}
 
 def category_label(name: str) -> str:
     return CATEGORY_LABELS.get(name, name)
-st.set_page_config(page_title="Vendor Document Dashboard", page_icon="\U0001f4c2", layout="wide")
+st.set_page_config(page_title="Vendor Document Dashboard", page_icon="📂", layout="wide")
 st.markdown("""
 <style>
 .stApp{background:#f5f7fa;color:#172b3a}
@@ -68,8 +68,16 @@ def authenticated() -> bool:
     if not password:
         if (APP_DIR / "CLOUD_DEPLOYMENT").exists():
             st.title("Vendor Document Dashboard")
-            st.warning("First-time cloud setup: set APP_PASSWORD in Streamlit Settings > Secrets.")
-            st.code('APP_PASSWORD = "your-own-long-password"\n# Durable online storage:\nDATABASE_URL = "postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"', language="toml")
+            st.warning("First-time cloud setup: set APP_PASSWORD in Render environment variables.")
+            st.code(
+                'APP_PASSWORD = "your-own-long-password"\n'
+                '# Permanent Google Drive storage:\n'
+                'GOOGLE_DRIVE_FOLDER_ID = "your-folder-id"\n'
+                'GOOGLE_DRIVE_CREDENTIALS_JSON = "{...OAuth authorized-user JSON...}"\n'
+                '# Optional PostgreSQL alternative:\n'
+                'DATABASE_URL = "postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"',
+                language="toml",
+            )
             st.caption("Keep the app private. Never upload vendor documents or secrets to GitHub.")
             return False
         return True
@@ -96,17 +104,49 @@ if not authenticated():
 
 
 @st.cache_resource
-def open_store(data_dir: str, database_url: str) -> Store:
+def open_store(
+    data_dir: str,
+    database_url: str,
+    drive_folder_id: str,
+    drive_credentials_json: str,
+    drive_impersonate_user: str,
+) -> Store:
+    """Choose permanent Drive storage first when its private credentials are configured."""
+    if drive_folder_id.strip() and drive_credentials_json.strip():
+        from drive_store import DriveStore
+        return DriveStore(
+            Path(data_dir),
+            folder_id=drive_folder_id.strip(),
+            credentials_json=drive_credentials_json,
+            impersonate_user=drive_impersonate_user.strip(),
+        )
     return Store(Path(data_dir), database_url)
 
 
+drive_folder_id = setting("GOOGLE_DRIVE_FOLDER_ID")
+drive_credentials_json = setting("GOOGLE_DRIVE_CREDENTIALS_JSON")
+drive_impersonate_user = setting("GOOGLE_DRIVE_IMPERSONATE_USER")
+
 try:
-    store = open_store(setting("VENDOR_DATA_DIR", str(APP_DIR / "vendor_data")), setting("DATABASE_URL"))
+    store = open_store(
+        setting("VENDOR_DATA_DIR", str(APP_DIR / "vendor_data")),
+        setting("DATABASE_URL"),
+        drive_folder_id,
+        drive_credentials_json,
+        drive_impersonate_user,
+    )
 except Exception as error:
-    logging.getLogger(__name__).error("Storage initialization failed: %s", type(error).__name__)
-    st.error("Storage could not be opened. Check the data folder or your private database settings. No documents were loaded.")
+    logging.getLogger(__name__).exception("Storage initialization failed")
+    st.error(
+        "Storage could not be opened. Check GOOGLE_DRIVE_FOLDER_ID / GOOGLE_DRIVE_CREDENTIALS_JSON "
+        "or your private database settings. No documents were loaded."
+    )
+    if isinstance(error, ValueError):
+        st.caption(str(error))
     st.stop()
 
+DRIVE_ENABLED = bool(getattr(store, "drive_enabled", False))
+DRIVE_AUTH_INCOMPLETE = bool(drive_folder_id.strip()) and not bool(drive_credentials_json.strip())
 HAS_ARROW = importlib.util.find_spec("pyarrow") is not None
 
 
@@ -242,6 +282,9 @@ aliases = store.aliases()
 review_queue = store.review_queue()
 checklist = build_checklist(vendors, documents)
 counts = dashboard_counts(vendors, documents)
+# A vendor contributes to head count only when at least one checklist category is Yes.
+# All-No vendors remain visible in the checklist but do not inflate the company count.
+counts["companies"] = int((checklist["Available"] > 0).sum()) if len(checklist) else 0
 view_cleared = bool(st.session_state.get("view_cleared", False))
 display_counts = {k: 0 for k in counts} if view_cleared else counts
 
@@ -253,15 +296,20 @@ with st.sidebar:
     st.caption("HOW TO USE")
     st.write("**1.** Upload your company-folders ZIP.\n\n**2.** Search and select a company.\n\n**3.** Download its Excel or documents.")
     st.divider()
-    if store.cloud:
+    if DRIVE_ENABLED:
+        st.success("Permanent Google Drive storage connected")
+        st.caption("Documents, retained ZIPs and dashboard metadata are stored in Google Drive. Render disk is only a temporary cache.")
+    elif store.cloud:
         st.success("Saved to cloud database")
         st.caption("Files and records are stored in PostgreSQL.")
+    elif DRIVE_AUTH_INCOMPLETE:
+        st.warning("Google Drive folder is configured, but GOOGLE_DRIVE_CREDENTIALS_JSON is missing. Uploads are still temporary until Drive authorization is added.")
     elif (APP_DIR / "CLOUD_DEPLOYMENT").exists():
-        st.warning("Temporary cloud disk. Set DATABASE_URL for permanent uploads.")
+        st.warning("Temporary cloud disk. Configure Google Drive credentials or DATABASE_URL for permanent uploads.")
     else:
         st.success("Saved on this computer")
         st.caption("Records stay in vendor_data after closing the browser. Keep this folder when updating.")
-    st.caption("Version 3.12 Reset Fix | 7 Sep 2026")
+    st.caption("Version 3.13 Drive Storage | 16 Sep 2026")
     if setting("APP_PASSWORD") and st.button("Sign out", width="stretch"):
         st.session_state.clear(); st.rerun()
 
@@ -278,14 +326,14 @@ if notice := st.session_state.pop("notice", None):
     st.success(notice)
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Total companies", f"{display_counts['companies']:,}", help="Unique saved company names. Handover folders and document counts are excluded.")
+m1.metric("Total companies", f"{display_counts['companies']:,}", help="Companies with at least one Yes document category. All-No checklist rows are visible but are not counted.")
 m2.metric("Stored documents", f"{display_counts['stored_files']:,}", help="Available document records. Identical bytes uploaded again for the same company do not increase this count.")
 m3.metric(f"All {len(DOCUMENT_TYPES)} types available", f"{display_counts['complete_companies']:,}", help="Every checklist category has a classified file; this is not a validity/compliance score.")
 m4.metric("Needs review", f"{display_counts['review_files']:,}", help="Unassigned, unclassified or unavailable document files.")
 if view_cleared:
     st.info("Dashboard view is cleared, so the summary shows 0. Saved data is still stored. Click **Show saved data** to bring it back, or use **Reset all data** to actually delete the active records.")
 else:
-    st.caption("Totals include all saved data. Search results are counted separately below.")
+    st.caption("Totals include all saved data. Search results are counted separately below. Total companies counts only vendors with at least one Yes.")
 
     st.subheader("Document headcount by category")
     st.caption("Headcount includes only companies marked Yes for each document category.")
@@ -298,6 +346,8 @@ else:
 if page == "Upload documents":
     st.subheader("Upload vendor documents")
     st.write("Upload your company-folders ZIP here. The dashboard will detect companies, classify files, update the Yes / No checklist, and keep existing saved records. Exact repeats are skipped.")
+    if DRIVE_ENABLED:
+        st.success("Permanent storage is active: newly saved documents and dashboard metadata are written to Google Drive.")
     source_mode = st.radio("Import source", ["Google Drive ZIP (large files)", "Upload small files"], horizontal=True, key="import_source")
     drive_link = ""
     uploads = []
@@ -338,11 +388,11 @@ if page == "Upload documents":
             st.info(note)
         st.subheader("Last upload summary")
         summary = pd.DataFrame([{
-            "Companies in upload": last["detected_companies"], "Total vendor head count": last.get("total_companies", len(vendors)),
+            "Companies in upload": last["detected_companies"], "Total vendor head count": last.get("total_companies", counts["companies"]),
             "Files processed": last["processed_files"], "New documents": last["saved_files"],
             "Repeated files": last["duplicate_files"], "Skipped / failed": len(last["issues"])}])
         show_table(summary)
-        st.caption("Source: " + last["source"] + ". Vendor head count is cumulative and unique: existing vendors are counted once, and new vendor names from later ZIPs are added automatically.")
+        st.caption("Source: " + last["source"] + ". Vendor head count is cumulative, unique and Yes-only: all-No companies remain visible in the checklist but are not counted.")
         expected_count = st.session_state.get("expected_count", 0)
         if expected_count and expected_count != last["detected_companies"]:
             st.warning(f"You expected {expected_count} companies; this upload identified {last['detected_companies']}. Check the company list below. Counts are not padded.")
@@ -460,16 +510,16 @@ elif page == "Uploaded ZIPs":
     if upload_archives.empty:
         st.info("No ZIP upload has been archived yet. Go to Upload documents and save a vendor ZIP.")
     else:
-        unique_vendors = vendors.drop_duplicates("company_key")
-        company_names = unique_vendors.sort_values("company_name", key=lambda s: s.str.casefold()).company_name.tolist()
-        st.metric("Company head count", f"{len(company_names):,}", help="Unique companies currently stored in the dashboard across all uploaded ZIP files.")
-        st.caption(f"One cumulative count across {len(upload_archives)} uploaded ZIP file(s). A company uploaded in multiple ZIPs is counted once.")
+        counted = checklist[checklist["Available"] > 0].copy()
+        company_names = counted.sort_values("Company Name", key=lambda s: s.str.casefold())["Company Name"].tolist()
+        st.metric("Company head count", f"{len(company_names):,}", help="Unique companies with at least one Yes document category across all uploaded ZIP files.")
+        st.caption(f"One cumulative Yes-only count across {len(upload_archives)} uploaded ZIP file(s). A company uploaded in multiple ZIPs is counted once; all-No companies are not counted.")
 
-        with st.expander(f"Show {len(company_names)} company names"):
+        with st.expander(f"Show {len(company_names)} counted company names"):
             if company_names:
                 show_table(pd.DataFrame({"No.": range(1, len(company_names)+1), "Company Name": company_names}))
             else:
-                st.caption("No companies are currently stored.")
+                st.caption("No companies currently have a Yes document category.")
 
         st.markdown("#### Download uploaded ZIP files")
         st.caption("These are source-archive downloads only; their contents are not used as separate company head counts.")
@@ -519,11 +569,17 @@ elif page == "Review files":
 
 else:
     st.subheader("Data storage & backups")
-    if store.cloud:
+    if DRIVE_ENABLED:
+        st.success("Google Drive permanent storage is configured.")
+        st.caption("Documents, retained original ZIPs and the live dashboard metadata database are stored in Google Drive. Render's local disk is only a rebuildable cache.")
+    elif store.cloud:
         st.success("PostgreSQL storage is configured. Files, company records and reset backups are saved there.")
     else:
-        st.info("Local data is saved in the vendor_data folder beside app.py. Closing the browser or resetting search does not delete it.")
-        st.caption("For Streamlit Community Cloud, configure DATABASE_URL. Its local disk is not guaranteed to persist.")
+        st.info("Local data is saved in the vendor_data folder beside app.py. On Render free services this disk is temporary and can be lost after restart or redeploy.")
+        if DRIVE_AUTH_INCOMPLETE:
+            st.warning("Finish Google Drive authorization by adding GOOGLE_DRIVE_CREDENTIALS_JSON in Render Environment.")
+        else:
+            st.caption("Configure Google Drive credentials or DATABASE_URL before relying on cloud uploads.")
     st.caption("Password protection is a shared-team control, not individual roles. Restrict app access when using PAN, Aadhaar and bank documents.")
     st.markdown("#### Download or restore a backup")
     if st.button("Prepare full data backup",key="prepare_backup"):
@@ -591,7 +647,7 @@ else:
     with st.expander("Folder structure & matching"):
         st.code("Any handover vendor/\n  01 - Company A/\n    GST.pdf\n    PAN Card.pdf\n  02 - Company B/\n    ISO.pdf\n    Cancelled Cheque.jpg",language="text")
         st.write("Company folders decide ownership. Handover names and generic section folders are ignored, not appended to company names.")
-        st.write("Identical bytes within the same company count once. Different document versions remain separate files. A company counts once even with several documents.")
+        st.write("Identical bytes within the same company count once. Different document versions remain separate files. A company counts once only when at least one checklist category is Yes.")
         st.caption("Limits: 5 GB Drive ZIP download, 64 MB per browser upload, 5,000 entries, 128 MB per document, 5 GB expanded data. Original ZIPs over 32 MB are kept at their source. Skipped or unreadable files are listed in the upload summary. No OCR or external classifier is used.")
     st.subheader("Company name cleanup")
     st.caption("Merge existing records such as 'Alpha Ltd', 'alpha ltd.' and 'Alpha   Ltd' into one company. Documents are retained; identical files are combined.")
