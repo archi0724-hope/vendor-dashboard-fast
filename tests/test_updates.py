@@ -32,10 +32,12 @@ def test_systematic_sections_folder_count_and_repeats(tmp_path):
     result=import_documents(store,[upload])
     assert result.detected_companies==3 and result.processed_files==3
     assert result.saved_files==2 and result.duplicate_files==1
-    assert result.total_companies==3 and not result.issues
+    # Empty Ltd remains visible in the checklist, but all-No companies do not
+    # contribute to the dashboard/company headcount.
+    assert result.total_companies==2 and not result.issues
     again=import_documents(Store(tmp_path),[upload])
     assert again.saved_files==0 and again.duplicate_files==3
-    assert dashboard_counts(store.vendors(),store.documents())['companies']==3
+    assert dashboard_counts(store.vendors(),store.documents())['companies']==2
     assert len(store.history())==2
 
 

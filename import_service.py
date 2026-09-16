@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 import pandas as pd
-from vendor_core import ArchiveLimits, classify, discover_folder_companies, iter_uploads, company_key, clean_company, upload_stream
+from vendor_core import ArchiveLimits, build_checklist, classify, discover_folder_companies, iter_uploads, company_key, clean_company, upload_stream
 
 @dataclass
 class ImportResult:
@@ -84,8 +84,14 @@ def import_documents(store, uploads, forced_company: str = "", read_pdf_text: bo
     result.issues.extend(limits.skipped)
     result.company_names = sorted({company_key(n): clean_company(n) for n in detected}.values(), key=str.casefold)
     result.detected_companies = len(result.company_names)
-    result.total_companies = len(store.vendors())
-    result.total_stored_files = int(store.documents().available.sum())
+    vendors = store.vendors()
+    documents = store.documents()
+    checklist = build_checklist(vendors, documents)
+    # Headcount means a company has at least one actual Yes. Companies that are
+    # present in the master/checklist but are all-No stay visible without being
+    # included in the cumulative headcount.
+    result.total_companies = int((checklist["Available"] > 0).sum()) if len(checklist) else 0
+    result.total_stored_files = int(documents.available.sum())
     store.log_event("Document upload", result.to_dict())
     return result
 
