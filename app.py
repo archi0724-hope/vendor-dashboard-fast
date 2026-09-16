@@ -281,6 +281,17 @@ if view_cleared:
 else:
     st.caption("Totals include all saved data. Search results are counted separately below.")
 
+    st.subheader("Document totals by category")
+    st.caption("All saved data. Each card shows the total available files in that checklist category; the line underneath shows how many companies have at least one file in that category.")
+    for start in range(0, len(DOCUMENT_TYPES), 5):
+        category_columns = st.columns(5)
+        for column, category in zip(category_columns, DOCUMENT_TYPES[start:start + 5]):
+            category_mask = documents.available & documents.types.map(lambda values: category in values)
+            document_count = int(category_mask.sum())
+            company_count = int(documents.loc[category_mask & documents.company_key.ne(""), "company_key"].nunique())
+            column.metric(category, f"{document_count:,}", help="Total available saved files classified in this category.")
+            column.caption(f"{company_count:,} companies")
+
 if page == "Upload documents":
     st.subheader("Upload vendor documents")
     st.write("Upload your company-folders ZIP here. The dashboard will detect companies, classify files, update the Yes / No checklist, and keep existing saved records. Exact repeats are skipped.")
