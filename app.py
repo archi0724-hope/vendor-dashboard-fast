@@ -306,14 +306,15 @@ if page == "Upload documents":
         st.stop()
     st.caption(f"Maximum individual document size: {document_limit_bytes() // 1024**2} MB. One import can run at a time; other users can browse and refresh saved records.")
     st.write("Upload your company-folders ZIP here. The dashboard will detect companies, classify files, update the Yes / No checklist, and keep existing saved records. Exact repeats are skipped.")
-    source_mode = st.radio("Import source", ["Google Drive ZIP (large files)", "Upload small files"], horizontal=True, key="import_source")
+    source_mode = st.radio("Import source", ["5 GB upload - Google Drive ZIP", "Browser upload - up to 64 MB"], horizontal=True, key="import_source")
     drive_link = ""
     uploads = []
-    if source_mode == "Google Drive ZIP (large files)":
-        drive_link = st.text_input("Google Drive ZIP link", placeholder="https://drive.google.com/file/d/.../view")
-        st.caption("Downloads directly to the server in small chunks, then saves documents one at a time. The link must allow downloads without signing in. Keep the original ZIP in Drive; it will not be copied to Uploaded ZIPs. Transfer speed depends on Drive and your server. Keep this tab open during import.")
+    if source_mode == "5 GB upload - Google Drive ZIP":
+        drive_link = st.text_input("5 GB upload - Google Drive ZIP link", placeholder="https://drive.google.com/file/d/.../view")
+        st.success("Large ZIP mode supports Google Drive ZIP files up to 5 GB and streams them to the server to reduce 502/restart risk.")
+        st.caption("Paste a Google Drive ZIP link that can be downloaded without signing in. The ZIP is streamed to temporary server storage, then documents are saved one at a time. Keep the original ZIP in Drive; it is not copied to Uploaded ZIPs. Keep this tab open during import.")
     else:
-        st.caption("For large ZIPs, use Google Drive above. Browser uploads are limited to 64 MB per file; use small batches.")
+        st.caption("Direct browser upload is limited to 64 MB per batch on this Render service. For anything larger, use the 5 GB Google Drive option above.")
         uploads = st.file_uploader("Choose document ZIP or files", type=["zip"]+sorted(e.lstrip(".") for e in ALLOWED_EXTENSIONS), accept_multiple_files=True, key="document_uploads")
     with st.expander("Optional settings"):
         single_company = st.text_input("Company for loose files only", key="loose_company", help="Leave blank for company-folder ZIPs. This assigns every selected file to one company.")
