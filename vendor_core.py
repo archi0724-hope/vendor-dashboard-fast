@@ -529,3 +529,20 @@ def dashboard_counts(vendors: pd.DataFrame, documents: pd.DataFrame) -> dict:
         "complete_companies": int((checklist.Missing == 0).sum()),
         "unassigned_files": int((documents.company_key == "").sum()),
     }
+
+
+def document_type_counts(documents: pd.DataFrame) -> pd.DataFrame:
+    """Count available saved records and distinct assigned companies per type."""
+    counts = {name: 0 for name in DOCUMENT_TYPES}
+    companies = {name: set() for name in DOCUMENT_TYPES}
+    for doc in documents.itertuples(index=False):
+        if not doc.available:
+            continue
+        for name in set(doc.types).intersection(DOCUMENT_TYPES):
+            counts[name] += 1
+            if doc.company_key:
+                companies[name].add(doc.company_key)
+    return pd.DataFrame([
+        {"Document type": name, "Documents": counts[name], "Companies": len(companies[name])}
+        for name in DOCUMENT_TYPES
+    ])

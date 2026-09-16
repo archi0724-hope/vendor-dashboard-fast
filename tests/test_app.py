@@ -141,3 +141,16 @@ def test_render_without_database_blocks_import_ui(tmp_path, monkeypatch):
     assert not at.exception
     assert any('Uploads are paused' in item.value for item in at.error)
     assert not any(button.key == 'save_documents' for button in at.button)
+
+
+def test_category_totals_remain_global_and_refresh(tmp_path):
+    store = seed(tmp_path)
+    at = app(tmp_path).run()
+    assert not at.exception
+    assert next(m for m in at.metric if m.label == 'GST').value == '2'
+    assert next(m for m in at.metric if m.label == 'ASF ISO').value == '0'
+    at.text_input(key='company_search').set_value('Beta').run()
+    assert next(m for m in at.metric if m.label == 'GST').value == '2'
+    store.save_document('Gamma Devices/ISO.txt', b'new iso', classify('Gamma Devices/ISO.txt'))
+    at.button(key='refresh_shared_data').click().run()
+    assert next(m for m in at.metric if m.label == 'ASF ISO').value == '1'

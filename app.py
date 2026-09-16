@@ -20,7 +20,7 @@ from import_service import import_documents
 from drive_import import download_drive_zip
 from runtime_policy import durable_storage_required, import_slot, document_limit_bytes
 from storage import Store
-from vendor_core import (ALLOWED_EXTENSIONS, DOCUMENT_TYPES, build_checklist, dashboard_counts,
+from vendor_core import (ALLOWED_EXTENSIONS, DOCUMENT_TYPES, build_checklist, dashboard_counts, document_type_counts,
                          export_filename, filter_checklist, read_vendor_file, supporting_category)
 
 APP_DIR = Path(__file__).resolve().parent
@@ -285,6 +285,18 @@ if view_cleared:
     st.info("Dashboard view is cleared, so the summary shows 0. Saved data is still stored. Click **Show saved data** to bring it back, or use **Reset all data** to actually delete the active records.")
 else:
     st.caption("Totals include all saved data. Search results are counted separately below.")
+
+
+if not view_cleared:
+    st.subheader("Document totals by category")
+    category_totals = document_type_counts(documents)
+    st.caption("All saved data, regardless of search filters. Each card counts available document records; companies are counted once per category. A file classified in multiple categories counts in each.")
+    for start in range(0, len(category_totals), 5):
+        columns = st.columns(5)
+        for column, row in zip(columns, category_totals.iloc[start:start + 5].to_dict("records")):
+            column.metric(row["Document type"], f"{row['Documents']:,}", help="Number of available saved documents in this category. Missing file bytes are excluded.")
+            column.caption(f"{row['Companies']:,} companies")
+
 
 if page == "Upload documents":
     st.subheader("Upload vendor documents")
