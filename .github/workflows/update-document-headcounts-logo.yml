@@ -25,19 +25,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          mkdir -p assets
-          python - <<'PY'
-          from pathlib import Path
-          import base64
-
-          logo = '''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...TRUNCATED_FOR_BREVITY...'''
-          # The full image data is embedded in this workflow file by the caller.
-          data = base64.b64decode(logo)
-          if len(data) < 10000:
-              raise SystemExit("Logo data was unexpectedly truncated.")
-          Path("assets/hospkart_logo.jpg").write_bytes(data)
-          PY
-
           python - <<'PY'
           from pathlib import Path
 
@@ -113,6 +100,6 @@ jobs:
           python -m py_compile app.py
           git diff --check
           git rm .github/workflows/update-document-headcounts-logo.yml
-          git add app.py assets/hospkart_logo.jpg
-          git commit -m "Use Yes-only category headcounts, ISO label, and Hospkart logo"
+          git add app.py
+          git commit -m "Use Yes-only headcounts, ISO label, and Hospkart logo"
           git push origin HEAD:main
