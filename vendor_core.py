@@ -392,7 +392,7 @@ def iter_uploads(uploads, limits: ArchiveLimits | None = None) -> Iterator[tuple
             if data and len(data) <= limits.max_file_bytes:
                 yield source, data, source
             else:
-                limits.skipped.append({"File": source, "Reason": "Empty file / over 128 MB"})
+                limits.skipped.append({"File": source, "Reason": f"Empty file / over {limits.max_file_bytes // 1024**2} MB"})
         else:
             limits.skipped.append({"File": source, "Reason": "Unsupported file type"})
 

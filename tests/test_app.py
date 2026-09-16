@@ -132,3 +132,12 @@ def test_drive_import_ui(tmp_path):
     assert len(Store(tmp_path).documents()) == 1
     assert Store(tmp_path).upload_archives().empty
     assert any('original ZIP not copied' in item.value for item in at.info)
+
+
+def test_render_without_database_blocks_import_ui(tmp_path, monkeypatch):
+    monkeypatch.setenv('RENDER', 'true')
+    at = app(tmp_path).run()
+    at.radio(key='page').set_value('Upload documents').run()
+    assert not at.exception
+    assert any('Uploads are paused' in item.value for item in at.error)
+    assert not any(button.key == 'save_documents' for button in at.button)

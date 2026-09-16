@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 import pandas as pd
+from runtime_policy import ensure_durable_store, document_limit_bytes
 from vendor_core import ArchiveLimits, classify, discover_folder_companies, iter_uploads, company_key, clean_company, upload_stream
 
 @dataclass
@@ -26,6 +27,7 @@ class ImportResult:
 
 def import_documents(store, uploads, forced_company: str = "", read_pdf_text: bool = False,
                      progress: Callable | None = None, retain_archive: bool = True) -> ImportResult:
+    ensure_durable_store(store)
     uploads = list(uploads)
     result = ImportResult(source=", ".join(u.name for u in uploads))
     names = store.matching_companies()
@@ -34,7 +36,7 @@ def import_documents(store, uploads, forced_company: str = "", read_pdf_text: bo
         store.upsert_vendors(pd.DataFrame({"company_name": sorted(detected, key=str.casefold)}))
     for name in detected:
         names.setdefault(name, name)
-    limits = ArchiveLimits()
+    limits = ArchiveLimits(max_file_bytes=document_limit_bytes())
     try:
         for upload in uploads:
             archive_detected = set(discover_folder_companies([upload])) if not forced_company.strip() else {forced_company.strip()}

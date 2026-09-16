@@ -18,6 +18,7 @@ import streamlit as st
 from exports import csv_bytes, workbook_bytes
 from import_service import import_documents
 from drive_import import download_drive_zip
+from runtime_policy import durable_storage_required, import_slot, document_limit_bytes
 from storage import Store
 from vendor_core import (ALLOWED_EXTENSIONS, DOCUMENT_TYPES, build_checklist, dashboard_counts,
                          export_filename, filter_checklist, read_vendor_file, supporting_category)
@@ -63,7 +64,7 @@ def authenticated() -> bool:
     if not password:
         if (APP_DIR / "CLOUD_DEPLOYMENT").exists():
             st.title("Vendor Document Dashboard")
-            st.warning("First-time cloud setup: set APP_PASSWORD in Streamlit Settings > Secrets.")
+            st.warning("First-time setup: set APP_PASSWORD in your hosting environment (Render → Environment).")
             st.code('APP_PASSWORD = "your-own-long-password"\n# Durable online storage:\nDATABASE_URL = "postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"', language="toml")
             st.caption("Keep the app private. Never upload vendor documents or secrets to GitHub.")
             return False
@@ -113,7 +114,7 @@ def show_table(frame: pd.DataFrame):
     st.markdown('<div class="table-scroll">'+markup+'</div>', unsafe_allow_html=True)
 
 
-@st.cache_data(show_spinner=False, max_entries=128)
+@st.cache_data(show_spinner=False, max_entries=8)
 def first_page_pdf(payload: bytes) -> bytes | None:
     """Create a small cached PDF containing only the first page for fast preview."""
     try:
@@ -230,6 +231,8 @@ if st.session_state.pop("reset_completed", False):
 if pending_page := st.session_state.pop("pending_page", None):
     st.session_state["page"] = pending_page
 
+storage_ready = store.cloud or not durable_storage_required()
+
 vendors = store.vendors()
 documents = store.documents()
 upload_archives = store.upload_archives()
@@ -248,14 +251,16 @@ with st.sidebar:
     st.write("**1.** Upload your company-folders ZIP.\n\n**2.** Search and select a company.\n\n**3.** Download its Excel or documents.")
     st.divider()
     if store.cloud:
-        st.success("Saved to cloud database")
+        st.success("Shared permanent storage connected")
+        st.caption("Everyone who signs in uses the same saved company and document records.")
         st.caption("Files and records are stored in PostgreSQL.")
     elif (APP_DIR / "CLOUD_DEPLOYMENT").exists():
-        st.warning("Temporary cloud disk. Set DATABASE_URL for permanent uploads.")
+        st.error("Permanent storage not connected. Uploads are paused to prevent data loss.")
     else:
         st.success("Saved on this computer")
         st.caption("Records stay in vendor_data after closing the browser. Keep this folder when updating.")
-    st.caption("Version 3.12 Reset Fix | 7 Sep 2026")
+    st.button("Refresh shared data", key="refresh_shared_data", on_click=show_saved_data, width="stretch")
+    st.caption("Shared storage update | 16 Sep 2026")
     if setting("APP_PASSWORD") and st.button("Sign out", width="stretch"):
         st.session_state.clear(); st.rerun()
 
@@ -283,6 +288,11 @@ else:
 
 if page == "Upload documents":
     st.subheader("Upload vendor documents")
+    if not storage_ready:
+        st.error("Uploads are paused: permanent shared storage has not been connected. Ask the app owner to configure DATABASE_URL in Render. After that, everyone who signs in will see the same saved documents, including after restarts.")
+        st.info("Keep your original ZIP. Files already lost from temporary server storage must be imported again after storage is connected.")
+        st.stop()
+    st.caption(f"Maximum individual document size: {document_limit_bytes() // 1024**2} MB. One import can run at a time; other users can browse and refresh saved records.")
     st.write("Upload your company-folders ZIP here. The dashboard will detect companies, classify files, update the Yes / No checklist, and keep existing saved records. Exact repeats are skipped.")
     source_mode = st.radio("Import source", ["Google Drive ZIP (large files)", "Upload small files"], horizontal=True, key="import_source")
     drive_link = ""
@@ -304,11 +314,15 @@ if page == "Upload documents":
                 def show_progress(i, path):
                     if i == 1 or i % 10 == 0:
                         progress.caption(f"Saving file {i}: {path.rsplit('/', 1)[-1]}")
-                if drive_link.strip():
-                    with download_drive_zip(drive_link, lambda n: progress.caption(f"Downloaded {n / 1024**2:,.0f} MB...")) as downloaded:
-                        result = import_documents(store, [downloaded], single_company, use_pdf, show_progress, retain_archive=False)
-                else:
-                    result = import_documents(store, uploads, single_company, use_pdf, show_progress)
+                with import_slot():
+                    if drive_link.strip():
+                        with download_drive_zip(drive_link, lambda n: progress.caption(f"Downloaded {n / 1024**2:,.0f} MB...")) as downloaded:
+                            result = import_documents(store, [downloaded], single_company, use_pdf, show_progress, retain_archive=False)
+                    else:
+                        total_bytes = sum(getattr(u, "size", 0) for u in uploads)
+                        if total_bytes > 64 * 1024**2:
+                            raise ValueError("Keep each browser batch under 64 MB total, or use a Drive ZIP.")
+                        result = import_documents(store, uploads, single_company, use_pdf, show_progress)
             except Exception as error:
                 st.error(str(error) if isinstance(error, ValueError) else "Import interrupted. Check the Drive download permission, server disk space and connection, then retry. Previously saved documents remain available.")
                 st.stop()
@@ -507,7 +521,7 @@ else:
         st.success("PostgreSQL storage is configured. Files, company records and reset backups are saved there.")
     else:
         st.info("Local data is saved in the vendor_data folder beside app.py. Closing the browser or resetting search does not delete it.")
-        st.caption("For Streamlit Community Cloud, configure DATABASE_URL. Its local disk is not guaranteed to persist.")
+        st.warning("On Render, local files are temporary. Connect DATABASE_URL for shared storage that survives app restarts and redeployments.")
     st.caption("Password protection is a shared-team control, not individual roles. Restrict app access when using PAN, Aadhaar and bank documents.")
     st.markdown("#### Download or restore a backup")
     if st.button("Prepare full data backup",key="prepare_backup"):
@@ -520,7 +534,7 @@ else:
         st.download_button("Download data backup",data,"Vendor_Dashboard_Backup.zip","application/zip")
     with st.expander("Restore a dashboard backup"):
         restore_file=st.file_uploader("Backup ZIP made by this dashboard",type=["zip"],key="restore_upload")
-        if st.button("Restore uploaded backup",disabled=restore_file is None):
+        if st.button("Restore uploaded backup",disabled=restore_file is None or not storage_ready):
             try:
                 result=store.restore_backup(restore_file.getvalue())
                 refresh(f"Restored {result['restored']} documents; {result['duplicates']} repeats skipped. Existing data was kept.")
@@ -531,7 +545,7 @@ else:
             ids=[b["id"] for b in backups]
             picked=st.selectbox("Saved reset backups",ids)
             b1,b2=st.columns(2)
-            if b1.button("Restore selected reset backup"):
+            if b1.button("Restore selected reset backup", disabled=not storage_ready):
                 try:
                     result=store.restore_backup(store.read_backup(picked))
                     refresh(f"Restored {result['restored']} documents from the saved reset backup.")
@@ -576,7 +590,7 @@ else:
         st.code("Any handover vendor/\n  01 - Company A/\n    GST.pdf\n    PAN Card.pdf\n  02 - Company B/\n    ISO.pdf\n    Cancelled Cheque.jpg",language="text")
         st.write("Company folders decide ownership. Handover names and generic section folders are ignored, not appended to company names.")
         st.write("Identical bytes within the same company count once. Different document versions remain separate files. A company counts once even with several documents.")
-        st.caption("Limits: 5 GB Drive ZIP download, 64 MB per browser upload, 5,000 entries, 128 MB per document, 5 GB expanded data. Original ZIPs over 32 MB are kept at their source. Skipped or unreadable files are listed in the upload summary. No OCR or external classifier is used.")
+        st.caption("Limits: 5 GB Drive ZIP download, 64 MB per browser upload, 5,000 entries, 32 MB per document on Render (128 MB locally), 5 GB expanded data. Original ZIPs over 32 MB are kept at their source. Skipped or unreadable files are listed in the upload summary. No OCR or external classifier is used.")
     st.subheader("Company name cleanup")
     st.caption("Merge existing records such as 'Alpha Ltd', 'alpha ltd.' and 'Alpha   Ltd' into one company. Documents are retained; identical files are combined.")
     if st.button("Merge duplicate company names", key="merge_duplicate_companies"):

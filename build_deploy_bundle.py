@@ -4,10 +4,10 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent
 FILES = [
-    'app.py', 'vendor_core.py', 'storage.py', 'exports.py', 'import_service.py', 'drive_import.py', 'requirements.txt',
+    'app.py', 'vendor_core.py', 'storage.py', 'exports.py', 'import_service.py', 'drive_import.py', 'runtime_policy.py', 'requirements.txt',
     'README.md', 'DEPLOY_TO_STREAMLIT.md', 'FREE_DEPLOY_GUIDE.md', 'CHANGELOG.md', 'QA_REPORT.md', '.python-version',
     '.gitignore', '.streamlit/config.toml', '.streamlit/secrets.toml.example',
-    'START_WINDOWS.bat', 'render.yaml', 'build_deploy_bundle.py', 'tests/test_core.py', 'tests/test_app.py', 'tests/test_updates.py', 'tests/test_drive_import.py', 'LARGE_IMPORT_FIX.md', 'START_HERE.txt',
+    'START_WINDOWS.bat', 'render.yaml', 'build_deploy_bundle.py', 'tests/test_core.py', 'tests/test_app.py', 'tests/test_updates.py', 'tests/test_drive_import.py', 'tests/test_runtime_policy.py', 'LARGE_IMPORT_FIX.md', 'START_HERE.txt',
 ]
 
 

@@ -19,3 +19,7 @@ Set `APP_PASSWORD` in Render's environment settings. Set `DATABASE_URL` to an ex
 ## Tests
 
 Install requirements and pytest, then run `PYTHONPATH=. python -m pytest tests -q`. The prepared fix passed 87 tests with synthetic documents, mocked Drive responses and local SQLite. Production Drive and PostgreSQL throughput are not benchmarked.
+
+## Shared storage rollout
+
+See [SHARED_STORAGE_SETUP.md](SHARED_STORAGE_SETUP.md) for the proposed database and migration checks. On Render, uploads are blocked until DATABASE_URL is configured. The Render per-document import cap is now 32 MiB; concurrent imports are rejected. Use **Refresh shared data** to see documents saved by other users. The prepared update passes 93 tests; production database persistence still requires provisioning and verification.
