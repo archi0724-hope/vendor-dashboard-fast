@@ -1,0 +1,78 @@
+name: Apply category headcounts only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-category-headcounts.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-category-headcounts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Keep the live dashboard and add only category totals
+        shell: bash
+        run: |
+          set -euo pipefail
+          ORIGINAL="$(git rev-parse HEAD)"
+          LIVE_BASE="3dd6397499c7bb7ca73dd892d4973e7e2f13af59"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --detach "$LIVE_BASE"
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app.py")
+          text = path.read_text(encoding="utf-8")
+          anchor = '''if view_cleared:
+              st.info("Dashboard view is cleared, so the summary shows 0. Saved data is still stored. Click **Show saved data** to bring it back, or use **Reset all data** to actually delete the active records.")
+          else:
+              st.caption("Totals include all saved data. Search results are counted separately below.")
+
+          if page == "Upload documents":
+          '''
+          replacement = '''if view_cleared:
+              st.info("Dashboard view is cleared, so the summary shows 0. Saved data is still stored. Click **Show saved data** to bring it back, or use **Reset all data** to actually delete the active records.")
+          else:
+              st.caption("Totals include all saved data. Search results are counted separately below.")
+
+              st.subheader("Document totals by category")
+              st.caption("All saved data. Each card shows the total available files in that checklist category; the line underneath shows how many companies have at least one file in that category.")
+              for start in range(0, len(DOCUMENT_TYPES), 5):
+                  category_columns = st.columns(5)
+                  for column, category in zip(category_columns, DOCUMENT_TYPES[start:start + 5]):
+                      category_mask = documents.available & documents.types.map(lambda values: category in values)
+                      document_count = int(category_mask.sum())
+                      company_count = int(documents.loc[category_mask & documents.company_key.ne(""), "company_key"].nunique())
+                      column.metric(category, f"{document_count:,}", help="Total available saved files classified in this category.")
+                      column.caption(f"{company_count:,} companies")
+
+          if page == "Upload documents":
+          '''
+          if anchor not in text:
+              raise SystemExit("Expected live-dashboard anchor was not found; refusing to change anything else.")
+          path.write_text(text.replace(anchor, replacement, 1), encoding="utf-8")
+          PY
+
+          git diff --check
+          CHANGED="$(git diff --name-only)"
+          if [ "$CHANGED" != "app.py" ]; then
+            echo "Unexpected changed files: $CHANGED"
+            exit 1
+          fi
+          python -m py_compile app.py
+
+          git add app.py
+          git commit -m "Show document headcounts by category"
+          git merge --no-ff -s ours "$ORIGINAL" -m "Preserve history while keeping live dashboard plus category headcounts"
+          git push origin HEAD:main
