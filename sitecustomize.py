@@ -9,11 +9,11 @@ from __future__ import annotations
 import os
 
 
-def _install_drive_store() -> None:
+def _install_drive_store() -> bool:
     folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
     credentials_json = os.environ.get("GOOGLE_DRIVE_CREDENTIALS_JSON", "").strip()
     if not (folder_id and credentials_json):
-        return
+        return False
 
     import storage
     from drive_store import DriveStore
@@ -28,6 +28,7 @@ def _install_drive_store() -> None:
             )
 
     storage.Store = RenderDriveStore
+    return True
 
 
 def _install_yes_only_headcount() -> None:
@@ -47,10 +48,48 @@ def _install_yes_only_headcount() -> None:
     vendor_core.dashboard_counts = yes_only_counts
 
 
+def _patch_drive_status_messages() -> None:
+    """Translate legacy PostgreSQL/local UI text when DriveStore is active.
+
+    The dashboard predates DriveStore and decides its badge from ``store.cloud``,
+    which specifically means PostgreSQL. DriveStore intentionally uses SQLite for
+    metadata and therefore keeps ``cloud=False`` even though document bytes and
+    the metadata snapshot are persisted in Google Drive. Rewriting only these
+    exact legacy messages makes the status truthful without changing storage
+    semantics.
+    """
+    import streamlit as st
+
+    original_warning = st.warning
+    original_info = st.info
+    original_caption = st.caption
+
+    def warning(message, *args, **kwargs):
+        if str(message) == "Temporary cloud disk. Set DATABASE_URL for permanent uploads.":
+            return st.success("Saved to Google Drive", *args, **kwargs)
+        return original_warning(message, *args, **kwargs)
+
+    def info(message, *args, **kwargs):
+        if str(message) == "Local data is saved in the vendor_data folder beside app.py. Closing the browser or resetting search does not delete it.":
+            return st.success("Google Drive permanent storage is configured. Documents and dashboard metadata are backed up in Drive.", *args, **kwargs)
+        return original_info(message, *args, **kwargs)
+
+    def caption(message, *args, **kwargs):
+        if str(message) == "For Streamlit Community Cloud, configure DATABASE_URL. Its local disk is not guaranteed to persist.":
+            message = "Render local disk is only a working cache; the permanent copy is stored in Google Drive."
+        return original_caption(message, *args, **kwargs)
+
+    st.warning = warning
+    st.info = info
+    st.caption = caption
+
+
 try:
-    _install_drive_store()
+    drive_active = _install_drive_store()
     _install_yes_only_headcount()
+    if drive_active:
+        _patch_drive_status_messages()
 except Exception:
-    # Do not hide startup errors from the app itself; Store initialization will
-    # produce the user-facing configuration error with full logging on Render.
+    # Leave the legacy warning visible if Drive cannot be initialized. This makes
+    # a missing/invalid credential obvious instead of falsely claiming persistence.
     pass
