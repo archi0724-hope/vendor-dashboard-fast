@@ -23,6 +23,11 @@ from vendor_core import (ALLOWED_EXTENSIONS, DOCUMENT_TYPES, build_checklist, da
                          export_filename, filter_checklist, read_vendor_file, supporting_category)
 
 APP_DIR = Path(__file__).resolve().parent
+CATEGORY_LABELS = {"ASF ISO": "ISO"}
+
+
+def category_label(name: str) -> str:
+    return CATEGORY_LABELS.get(name, name)
 st.set_page_config(page_title="Vendor Document Dashboard", page_icon="\U0001f4c2", layout="wide")
 st.markdown("""
 <style>
@@ -241,7 +246,8 @@ view_cleared = bool(st.session_state.get("view_cleared", False))
 display_counts = {k: 0 for k in counts} if view_cleared else counts
 
 with st.sidebar:
-    st.markdown('<div class="brand"><div class="brand-icon">VD</div><div><div class="brand-name">Vendor Workspace</div><div class="brand-sub">Documents, organised.</div></div></div>', unsafe_allow_html=True)
+    st.image(str(APP_DIR / "assets" / "hospkart_logo.jpg"), width=220)
+    st.markdown('<div class="brand"><div><div class="brand-name">Vendor Workspace</div><div class="brand-sub">Documents, organised.</div></div></div>', unsafe_allow_html=True)
     page = st.radio("Navigate", ["Companies & documents", "Upload documents", "Uploaded ZIPs", "Review files", "Data & backups"], key="page", captions=["Yes / No checklist + company downloads", "Add a new vendor batch", "Original ZIP uploads saved here", "Only files that need correction", "Backup, restore or reset saved data"])
     st.divider()
     st.caption("HOW TO USE")
@@ -281,16 +287,13 @@ if view_cleared:
 else:
     st.caption("Totals include all saved data. Search results are counted separately below.")
 
-    st.subheader("Document totals by category")
-    st.caption("All saved data. Each card shows the total available files in that checklist category; the line underneath shows how many companies have at least one file in that category.")
+    st.subheader("Document headcount by category")
+    st.caption("Headcount includes only companies marked Yes for each document category.")
     for start in range(0, len(DOCUMENT_TYPES), 5):
         category_columns = st.columns(5)
         for column, category in zip(category_columns, DOCUMENT_TYPES[start:start + 5]):
-            category_mask = documents.available & documents.types.map(lambda values: category in values)
-            document_count = int(category_mask.sum())
-            company_count = int(documents.loc[category_mask & documents.company_key.ne(""), "company_key"].nunique())
-            column.metric(category, f"{document_count:,}", help="Total available saved files classified in this category.")
-            column.caption(f"{company_count:,} companies")
+            yes_count = int((checklist[category] == "Yes").sum())
+            column.metric(category_label(category), f"{yes_count:,}", help="Company headcount where this document category is Yes.")
 
 if page == "Upload documents":
     st.subheader("Upload vendor documents")
@@ -376,6 +379,7 @@ elif page == "Companies & documents":
     else:
         st.markdown("### Yes / No document checklist")
         view = filtered.drop(columns=["company_key", "canonical_id"], errors="ignore").copy()
+        view.rename(columns=CATEGORY_LABELS, inplace=True)
         view.insert(0, "No.", range(1, len(view) + 1))
         view["Completion"] = view["Completion"].map(lambda v: f"{v:.0%}")
         show_table(view)
@@ -414,7 +418,8 @@ elif page == "Companies & documents":
                 rows = company_docs[company_docs.types.map(lambda ts: category in ts if category in DOCUMENT_TYPES else not ts)]
                 available = int(rows.available.sum())
                 yes_no = "Yes" if available else "No"
-                label = f"{category}  |  {yes_no}  |  {available} file(s)" if category in DOCUMENT_TYPES else f"Other documents  |  {available} file(s)"
+                display_category = category_label(category)
+                label = f"{display_category}  |  {yes_no}  |  {available} file(s)" if category in DOCUMENT_TYPES else f"Other documents  |  {available} file(s)"
                 with st.expander(label):
                     if rows.empty:
                         st.caption("No file available in this category.")
@@ -443,7 +448,7 @@ elif page == "Companies & documents":
         with st.expander("Document coverage across these companies"):
             import plotly.graph_objects as go
             values=[int((filtered[t]=="Yes").sum()) for t in DOCUMENT_TYPES]
-            fig=go.Figure(go.Bar(x=values,y=DOCUMENT_TYPES,orientation="h",text=values,textposition="outside",cliponaxis=False))
+            fig=go.Figure(go.Bar(x=values,y=[category_label(t) for t in DOCUMENT_TYPES],orientation="h",text=values,textposition="outside",cliponaxis=False))
             fig.update_layout(title="Companies with each document type",height=355,margin=dict(l=20,r=45,t=55,b=35),showlegend=False)
             fig.update_xaxes(title=f"Companies (out of {len(filtered)})",range=[0,max(1,len(filtered)*1.12)],dtick=max(1,len(filtered)//8))
             fig.update_yaxes(autorange="reversed")
@@ -495,7 +500,7 @@ elif page == "Review files":
         doc=queue[queue.id==selected_doc].iloc[0]
         with st.form(f"review_{selected_doc}"):
             company=st.text_input("Correct company name",value=doc.company_name)
-            types=st.multiselect("Document type(s)",DOCUMENT_TYPES,default=doc.types)
+            types=st.multiselect("Document type(s)",DOCUMENT_TYPES,default=doc.types,format_func=category_label)
             st.caption("Leave types empty to confirm a supporting/non-checklist document.")
             note=st.text_input("Note (optional)")
             submit=st.form_submit_button("Save correction",type="primary")
