@@ -1,8 +1,10 @@
-"""Runtime wiring for optional Google Drive persistence.
+"""Runtime wiring for optional Google Drive persistence and Vercel-safe imports.
 
 Python imports ``sitecustomize`` automatically at startup. When the Google Drive
 environment variables are present, the existing app transparently receives a
-Drive-backed Store without hard-coding credentials in GitHub.
+Drive-backed Store without hard-coding credentials in GitHub.  Vercel Drive ZIP
+imports also receive a resumable PostgreSQL fast path so a long import can be
+continued safely after the request/session window is reached.
 """
 from __future__ import annotations
 
@@ -47,10 +49,18 @@ def _install_yes_only_headcount() -> None:
     vendor_core.dashboard_counts = yes_only_counts
 
 
+def _install_vercel_resumable_imports() -> None:
+    # This patch is harmless on local/Render runs and activates its fast path only
+    # for PostgreSQL + Google Drive link imports.
+    import vercel_resumable
+    vercel_resumable.install()
+
+
 try:
     _install_drive_store()
     _install_yes_only_headcount()
+    _install_vercel_resumable_imports()
 except Exception:
     # Do not hide startup errors from the app itself; Store initialization will
-    # produce the user-facing configuration error with full logging on Render.
+    # produce the user-facing configuration error with full logging on the host.
     pass
