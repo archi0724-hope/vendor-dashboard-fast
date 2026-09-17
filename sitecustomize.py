@@ -1,10 +1,9 @@
 """Runtime wiring for optional Google Drive persistence and Vercel-safe imports.
 
-Python imports ``sitecustomize`` automatically at startup. When the Google Drive
-environment variables are present, the existing app transparently receives a
-Drive-backed Store without hard-coding credentials in GitHub. Vercel Drive ZIP
-imports also receive a resumable PostgreSQL fast path so a long import can be
-continued safely after the request/session window is reached.
+Python imports ``sitecustomize`` automatically at startup. When Google Drive
+credentials are configured, the existing app transparently receives a Drive-
+backed Store. For PostgreSQL deployments, Google Drive ZIP imports use a durable
+chunked runtime that checkpoints progress after every committed file.
 """
 from __future__ import annotations
 
@@ -46,23 +45,16 @@ def _install_yes_only_headcount() -> None:
     vendor_core.dashboard_counts = yes_only_counts
 
 
-def _install_vercel_resumable_imports() -> None:
-    import vercel_resumable
-
-    # The current Vercel container/session is ending at roughly two minutes for
-    # this Streamlit workload. Stop well before that boundary so the app can
-    # commit a checkpoint, render a success/paused message, and return normally.
-    # The same Drive link then resumes from the saved ZIP entry.
-    vercel_resumable.MAX_ACTION_SECONDS = 60.0
-    vercel_resumable.install()
+def _install_chunked_drive_imports() -> None:
+    import vercel_chunked_runtime
+    vercel_chunked_runtime.install()
 
 
 try:
     _install_drive_store()
     _install_yes_only_headcount()
-    _install_vercel_resumable_imports()
+    _install_chunked_drive_imports()
 except Exception:
-    # Do not block the dashboard during startup. The app itself reports storage
-    # configuration errors; import retries remain safe because PostgreSQL commits
-    # each successfully stored document independently.
+    # Startup must remain available even if an optional runtime patch cannot be
+    # installed. The main app still reports storage/configuration errors.
     pass
