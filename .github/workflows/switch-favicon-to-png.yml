@@ -1,0 +1,39 @@
+name: Switch HOSPkart favicon to PNG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/switch-favicon-to-png.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update-favicon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update favicon path
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          old = 'page_icon=str(APP_DIR / "assets" / "hospkart_logo.jpg")'
+          new = 'page_icon=str(APP_DIR / "assets" / "hospkart_favicon.png")'
+          if old not in s and new not in s:
+              raise SystemExit('Expected favicon setting not found')
+          if old in s:
+              p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Commit change
+        shell: bash
+        run: |
+          if git diff --quiet -- app.py; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Use HOSPkart PNG favicon"
+          git push origin HEAD:main
