@@ -2,7 +2,7 @@
 
 Python imports ``sitecustomize`` automatically at startup. When the Google Drive
 environment variables are present, the existing app transparently receives a
-Drive-backed Store without hard-coding credentials in GitHub.  Vercel Drive ZIP
+Drive-backed Store without hard-coding credentials in GitHub. Vercel Drive ZIP
 imports also receive a resumable PostgreSQL fast path so a long import can be
 continued safely after the request/session window is reached.
 """
@@ -40,9 +40,6 @@ def _install_yes_only_headcount() -> None:
     def yes_only_counts(vendors, documents):
         counts = original(vendors, documents)
         checklist = vendor_core.build_checklist(vendors, documents)
-        # A company contributes to head count only when at least one checklist
-        # category is Yes. All-No companies remain visible in the checklist but
-        # do not inflate head count.
         counts["companies"] = int((checklist["Available"] > 0).sum()) if len(checklist) else 0
         return counts
 
@@ -50,9 +47,13 @@ def _install_yes_only_headcount() -> None:
 
 
 def _install_vercel_resumable_imports() -> None:
-    # This patch is harmless on local/Render runs and activates its fast path only
-    # for PostgreSQL + Google Drive link imports.
     import vercel_resumable
+
+    # The current Vercel container/session is ending at roughly two minutes for
+    # this Streamlit workload. Stop well before that boundary so the app can
+    # commit a checkpoint, render a success/paused message, and return normally.
+    # The same Drive link then resumes from the saved ZIP entry.
+    vercel_resumable.MAX_ACTION_SECONDS = 60.0
     vercel_resumable.install()
 
 
@@ -61,6 +62,7 @@ try:
     _install_yes_only_headcount()
     _install_vercel_resumable_imports()
 except Exception:
-    # Do not hide startup errors from the app itself; Store initialization will
-    # produce the user-facing configuration error with full logging on the host.
+    # Do not block the dashboard during startup. The app itself reports storage
+    # configuration errors; import retries remain safe because PostgreSQL commits
+    # each successfully stored document independently.
     pass
