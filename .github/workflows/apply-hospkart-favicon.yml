@@ -1,0 +1,49 @@
+name: Apply HOSPkart favicon
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-hospkart-favicon.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-favicon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Replace browser tab icon only
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'st.set_page_config(page_title="Vendor Document Dashboard", page_icon="📂", layout="wide")'
+          new = 'st.set_page_config(page_title="Vendor Document Dashboard", page_icon=str(APP_DIR / "assets" / "hospkart_logo.jpg"), layout="wide")'
+          if old in text:
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+              print('Updated app.py favicon to HOSPkart logo.')
+          elif new in text:
+              print('Favicon is already updated; no app.py change needed.')
+          else:
+              raise SystemExit('Expected st.set_page_config line was not found; no changes made.')
+          PY
+
+      - name: Commit favicon change
+        shell: bash
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No favicon change to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Use HOSPkart logo as dashboard favicon"
+          git push origin HEAD:main
