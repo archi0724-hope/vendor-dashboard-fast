@@ -74,7 +74,7 @@ def authenticated() -> bool:
                 '# Permanent Google Drive storage:\n'
                 'GOOGLE_DRIVE_FOLDER_ID = "your-folder-id"\n'
                 'GOOGLE_DRIVE_CREDENTIALS_JSON = "{...OAuth authorized-user JSON...}"\n'
-                '# Optional PostgreSQL alternative:\n'
+                '# Optional PostgreSQL alternative; replace every placeholder:\n'
                 'DATABASE_URL = "postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"',
                 language="toml",
             )
