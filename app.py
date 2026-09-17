@@ -28,7 +28,7 @@ CATEGORY_LABELS = {"ASF ISO": "ISO"}
 
 def category_label(name: str) -> str:
     return CATEGORY_LABELS.get(name, name)
-st.set_page_config(page_title="Vendor Document Dashboard", page_icon="📂", layout="wide")
+st.set_page_config(page_title="Vendor Document Dashboard", page_icon=str(APP_DIR / "assets" / "hospkart_logo.jpg"), layout="wide")
 st.markdown("""
 <style>
 .stApp{background:#f5f7fa;color:#172b3a}
